@@ -1,339 +1,349 @@
+# -*- encoding: utf-8 -*-
+
 from configparser import ConfigParser
 from json import load, dump
 from os import getpid, listdir, remove, path, makedirs
 from prawcore.exceptions import RequestException, ServerError
-from requests import get, post
 from time import sleep, ctime, time
+from requests import get
 
 import praw
 import re
 import subprocess
 import youtube_dl
+import os
+import simplejson as json
+import requests
+import threading
 
 print(getpid())
 
 # Empty youtube logger
 class MyLogger():
-	def debug(self, msg):
-		pass
+    def debug(self, msg):
+        pass
 
-	def warning(self, msg):
-		pass
+    def warning(self, msg):
+        pass
 
-	def error(self, msg):
-		pass
+    def error(self, msg):
+        pass
 
 config = ConfigParser()
 config.read("praw.ini")
 
 reddit = praw.Reddit(**config["Reddit"])
 auth = config["Streamable"]["username"], config["Streamable"]["password"]
-yt = youtube_dl.YoutubeDL({"logger": MyLogger(), "outtmpl": "Media\\output"})
+yt = youtube_dl.YoutubeDL({"logger": MyLogger(), "outtmpl": "Media/%(id)s.mp4"})
 
 try:
-	with open("saved_links.txt") as file:
-		# Load hash file and only keep most recent 28 days
-		saved_links = [n for n in load(file) if n["created"] > time() - 3600 * 24 * 28]
+    with open("saved_links.txt") as file:
+        # Load hash file and only keep most recent 28 days
+        saved_links = [n for n in load(file) if n["created"] > time() - 3600 * 24 * 28]
 except FileNotFoundError:
-	with open("saved_links.txt", "w") as file:
-		saved_links = []
-		dump(saved_links, file)
+    with open("saved_links.txt", "w") as file:
+        saved_links = []
+        dump(saved_links, file)
 
 def check_links(submission):
-	if saved_links:
-		while saved_links[0]["created"] < time() - 3600 * 24 * 28:
-			saved_links.pop(0)
+    mirror_list = []
 
-	for data in saved_links:
-		if data["video_url"] == submission.url:
-			codes = [n[-5:] for n in data["links"]]
+    if saved_links:
+        while saved_links[0]["created"] < time() - 3600 * 24 * 28:
+            saved_links.pop(0)
 
-			if data["links"]:
-				reply_reddit(submission, codes)
-			
-				return save("Repost", submission, codes)
+    for data in saved_links:
+        if data["video_url"] == submission.url:
+            mirror_url = data["mirror_url"]
+
+
+            if data["mirror_url"]:
+                if not ("error" or "supplied") in str(mirror_url):
+                    for x in mirror_url.split():
+                        mirror_list.append(x.replace("'","").replace("[","").replace("]","").replace(",",""))
+                    
+                    reply_reddit(submission, mirror_list)
+            
+            return save("Repost", submission, mirror_list)
 
 def cleanup():
-	if not path.exists("Media"):
-		makedirs("Media")
+    print("Cleanup")
+    if not path.exists("Media"):
+        makedirs("Media")
 
-	for file in listdir("Media"):
-		remove("Media/" + file)
+    for file in listdir("Media"):
+        remove("Media/" + file)
 
 def combine_media():
-	command = [
-		"ffmpeg",
-		"-v", "quiet",
-		"-i", "Media\\video",
-		"-i", "Media\\audio",
-		"-c", "copy",
-		"-f", "mp4",
-		"Media\\output",
-		"-y"
-	]
+    command = [
+        "ffmpeg",
+        "-v", "quiet",
+        "-i", "Media/video",
+        "-i", "Media/audio",
+        "-c", "copy",
+        "-f", "mp4",
+        "Media/output.mp4",
+        "-y"
+    ]
 
-	subprocess.run(command, creationflags=8)
+    subprocess.run(command)
 
 def download(filename, url):
-	with open("Media/" + filename, "wb") as file:
-		file.write(get(url).content)			
+    with open("Media/" + filename, "wb") as file:
+        file.write(get(url).content)            
 
 def process(submission):
-	if check_links(submission):
-		return
+    print("process() entered")
+    print("Got next post: ", submission.title, " ", "https://reddit.com" + submission.permalink)
+    mirror_url = None
+    if check_links(submission):
+        print("Reposted old mirror link!")
+        return
+    
+    print("VIDEO URL: "+ submission.url)
 
-	# Twitter post
-	if "twitter" in submission.url:
-		response = yt.extract_info(submission.url, process=False)
+    # Twitter post
+    if "twitter" in submission.url:
+        print("TWEETER VIDEO")
+        response = yt.extract_info(submission.url, process=False)
+        
+        try:
+            while response.get("url"):
+                response = yt.extract_info(response["url"], process=False)
+        
+        except youtube_dl.utils.DownloadError:
+            return save("Twitter download error", submission)
+            
 
-		while response.get("url"):
-			response = yt.extract_info(response["url"], process=False)
+        submission.url = response["webpage_url"]
 
-		submission.url = response["webpage_url"]
+    # Reddit hosted video
+    if submission.domain == "v.redd.it":
+        print("LEDDIT VIDEO")
+        # If post is crosspost, set submission to linked post
+        if submission.media is None:
+            if hasattr(submission, "crosspost_parent"):
+                submission.media = reddit.submission(submission.crosspost_parent[3:]).media
+            else:
+                url = get(submission.url).url
+                _id = praw.models.reddit.submission.id_from_url(url)
+                submission.media = reddit.submission(_id).media
 
-	# Reddit hosted video
-	if submission.domain == "v.redd.it":
-		# If post is crosspost, set submission to linked post
-		if submission.media is None:
-			if hasattr(submission, "crosspost_parent"):
-				submission.media = reddit.submission(submission.crosspost_parent[3:]).media
-			else:
-				url = get(submission.url).url
-				_id = praw.models.reddit.submission.id_from_url(url)
-				submission.media = reddit.submission(_id).media
+        video_url = submission.media["reddit_video"]["fallback_url"]
+        download("video", video_url)
 
-		video_url = submission.media["reddit_video"]["fallback_url"]
-		download("video", video_url)
+        if submission.media["reddit_video"]["is_gif"]:
+            mirror_url = upload("Media/video")
+            status = "Complete"
+            print("Mirror url: " + str(mirror_url))
+            
+        
+        else:
+            audio_url = video_url.rsplit("/", 1)[0] + "/audio"
+            download("audio", audio_url)
+            combine_media()
 
-		if submission.media["reddit_video"]["is_gif"]:
-			code = upload("video", submission.title)
-		else:
-			audio_url = video_url.rsplit("/", 1)[0] + "/audio"
-			download("audio", audio_url)
-			combine_media()
+            mirror_url = upload("Media/output.mp4")
+            status = "Complete"
+            print("Mirror url: " + str(mirror_url))
 
-			code = upload("output", submission.title)
+        
 
-		status = wait_completed(code)
+        if status == "Complete":
+            reply_reddit(submission, mirror_url)
+            return save(status, submission, mirror_url)
+        
+    #download video
+    try:
+        yt.download([submission.url])
+    except (youtube_dl.utils.DownloadError) as e:
+        print(str(e))
+        return save(str(e), submission, "Download error")
+    except (youtube_dl.utils.SameFileError) as e:
+        print(str(e))
+        return save(str(e), submission, "Same file error")
 
-		if status == "Complete":
-			reply_reddit(submission, (code,))
-			return save(status, submission, (code,))
+    file = [i for i in listdir("Media")][0]
+    file = "Media/" + str(file)
+    mirror_url = upload(file)
+    if "NOT_HTTP: " in mirror_url:
+        print("NOT HTTP")
+        return
+    else:
+        status = "Complete"
+        print("Mirror url: " + str(mirror_url))
+        reply_reddit(submission, mirror_url)
+        return save(status, submission, mirror_url)
+     
+    # Should never be called
+    save("End", submission)            
 
-	# Import from url to streamable
-
-	url = "https://api.streamable.com/import"
-	parameters = {
-		"url": submission.url,
-		"title": submission.title
-	}
-
-	response = get(url, parameters, auth=auth)
-
-	if response.status_code == 200:
-		code = response.json()["shortcode"]
-
-		status = wait_completed(code)
-
-		if status == "Complete":
-			reply_reddit(submission, (code,))
-			return save(status, submission, (code,))
-	elif response.status_code == 403:
-		raise PermissionError
-	elif response.status_code == 404:
-		pass # Video not found
-
-	# Download video
-
-	try:
-		info = yt.extract_info(submission.url, process=False)
-	except youtube_dl.utilsDownloadError as e:
-		if "This video is only available for registered users" in str(e):
-			return save("Unauthorized", submission)
-		elif "Unsupported URL" in str(e):
-			return save("Unsupported URL", submission)
-		else:
-			return save(str(e).split(": ")[1], submission)
-
-	if info.get("duration"):
-		if info["duration"] < 1200:
-			try:
-				yt.download([submission.url])
-			except youtube_dl.utilsDownloadError as e:
-				return save(str(e).split(": ")[1], submission, (code,))
-
-			file = [i for i in listdir("Media") if "output" in i][0]
-
-			if info["duration"] < 600:
-				code = upload(file, submission.title)
-
-				status = wait_completed(code)
-
-				if status == "Complete":
-					reply_reddit(submission, (code,))
-					return save(status, submission, (code,))
-			else:
-				parts = int(info["duration"] // 600 + 1)
-
-				for part in range(parts):
-					command = [
-						"ffmpeg",
-						"-v", "quiet",
-						"-ss", str(info["duration"] * part // parts),
-						"-i", "Media/" + file,
-						"-t", str(info["duration"] * (part + 1) // parts),
-						"-c", "copy",
-						"Media/{}{}".format(part, file),
-						"-y"
-					]
-
-					subprocess.run(command)
-
-				codes = []
-				for part in range(parts):
-					filename = "{}{}".format(part, file)
-					video_title = "{} [Part {}]".format(submission.title, part + 1)
-					codes.append(upload(filename, video_title))
-
-				for code in codes:
-					status = wait_completed(code)
-
-				if status == "Complete":
-					reply_reddit(submission, codes)
-					return save(status, submission, codes)
-		else:
-			return save("Over 20 minutes", submission)
-	else:
-		return save("Duration not found", submission)
-
-	# Should never be called
-	save("End", submission)			
-
-def reply_reddit(submission, codes):
-	if len(codes) == 1:
-		mirror_text = "[Mirror](https://streamable.com/{})  \n".format(codes[0])
-	else:
-		mirror_format = "[Mirror [Part {}]](https://streamable.com/{})  \n"
-		mirror_text = "".join(mirror_format.format(part, code) for part, code in enumerate(codes, 1))
-
-	submission.reply(" | ".join([
-		mirror_text + "  \nI am a bot",
-		"[Feedback](https://www.reddit.com/message/compose/?to={[Reddit][host_account]}&subject=PublicFreakout%20Mirror%20Bot)".format(config),
-		"[Github](https://github.com/Gprime5/PublicFreakout-Mirror-Bot)"
-	]))	
+def reply_reddit(submission, mirror_url):
+    print("Submitting comment...")
+    while True:
+        if not mirror_url:
+            return
+        try:
+            counter = 0
+            mirror_text = ""
+            for x in mirror_url:
+                if not x:
+                    continue
+                mirror_text += "[Mirror {}]({}) \n\n ".format(counter + 1, mirror_url[counter])
+                counter += 1
+            comment = submission.reply(" | ".join([
+                mirror_text + "  \nI am a bot",
+                "[Feedback](https://www.reddit.com/message/compose/?to={[Reddit][host_account]}&subject=PublicFreakout%20Mirror%20Bot)".format(config),
+                "Github (source will be uploaded soon) ",
+                "*Please send feedback if the link begins a download instead of playing within your browser*"
+            ]))
+            comment.mod.approve()
+            break
+        
+        except praw.exceptions.APIException:
+            print("Rate limit exception")
+            sleep(60)
+            continue
 
 def run():
-	while True:
-		stream = reddit.subreddit("PublicFreakout").stream.submissions(pause_after=1)
+    while True:
+        stream = reddit.subreddit("PublicFreakout").stream.submissions(pause_after=1)
 
-		try:
-			checked = [n._extract_submission_id() for n in reddit.user.me().comments.new()]
-		except RequestException:
-			sleep(60)
-			continue
+        try:
+            checked = [n._extract_submission_id() for n in reddit.user.me().comments.new()]
+        except RequestException:
+            sleep(60)
+            continue
 
-		while True:
-			cleanup()
+        while True:
+            cleanup()
 
-			try:
-				# Get next post
-				submission = next(stream)
-			except RequestException:
-				# Client side error
-				sleep(60)
-			except ServerError:
-				# Reddit side error
-				sleep(60)
-			except StopIteration:
-				break
-			else:
-				if submission is None:
-					continue
+            try:
+                # Get next post
+                submission = next(stream)
+            except RequestException:
+                # Client side error
+                sleep(60)
+            except ServerError:
+                # Reddit side error
+                sleep(60)
+            except StopIteration:
+                break
+            else:
+                if submission is None:
+                    print("No new posts.")
+                    continue
 
-				if submission.is_self:
-					continue
+                if submission.is_self:
+                    print("Skipping self-post.")
+                    continue
 
-				if re.search("(?:sex|fight|naked|nude|nsfw|brawl|poop)", submission.title, 2):
-					continue
+                # Don't bother creating mirror for posts over a day old
+                if submission.created_utc < time() - 3600 * 24 * 1:
+                    print("Submission is too old")
+                    continue
 
-				# Don't bother creating mirror for posts over a day old
-				if submission.created_utc < time() - 3600 * 24:
-					continue
+                if submission in checked:
+                    print("Submission already mirrored")
+                    continue
 
-				if submission in checked:
-					continue
+                try:
+                    process(submission)
+                except PermissionError:
+                    return "Permission denied"
 
-				try:
-					process(submission)
-				except PermissionError:
-					return "Permission denied"
+            cleanup()
 
-			cleanup()
+def save(status, submission, mirror_url=None):
+    if not mirror_url:
+        print("Unable to save to file: No url supplied")
+        return
+    text = "{:<19} | " + ctime() + " | https://www.reddit.com{:<85} | {}\n"
+    permalink = submission.permalink.encode("ascii", "ignore").decode()
 
-def save(status, submission, codes=None):
-	text = "{:<19} | " + ctime() + " | https://www.reddit.com{:<85} | {}\n"
-	permalink = submission.permalink.encode("ascii", "ignore").decode()
-	links = ["https://streamable.com/" + code for code in (codes or [])]
+    with open(auth[0] + " log.txt", "a") as file:
+        file.write(text.format(status, permalink, " | " + str(mirror_url)))
 
-	with open(auth[0] + " log.txt", "a") as file:
-		file.write(text.format(status, permalink, " | ".join(links)))
+    saved_links.append({
+        "created": int(submission.created_utc),
+        "reddit": "https://www.reddit.com" + permalink,
+        "video_url": submission.url,
+        "mirror_url": str(mirror_url)
+    })
 
-	saved_links.append({
-		"created": int(submission.created_utc),
-		"reddit": "https://www.reddit.com" + permalink,
-		"video_url": submission.url,
-		"links": links
-	})
+    while saved_links[0]["created"] < time() - 3600 * 24 * 28:
+        saved_links.pop(0)
 
-	while saved_links[0]["created"] < time() - 3600 * 24 * 28:
-		saved_links.pop(0)
+    with open("saved_links.txt", "w") as file:
+        dump(saved_links, file, indent=4, sort_keys=True)
 
-	with open("saved_links.txt", "w") as file:
-		dump(saved_links, file, indent=4, sort_keys=True)
+    return True
 
-	return True
+#new upload function, doesn't use limf
+#uploads to given pomf.se clone
 
-def upload(filename, title):
-	url = "https://api.streamable.com/upload"
-	title = title.encode("ascii", "ignore").decode().replace('"', "'")
+def upload_files(selected_host, file_name, mirror_list):
+    url = selected_host
+    try:
+        answer = requests.post(url, files={'files[]': open(file_name, 'rb')})
+        mirror = json.loads(answer.text)
+        if not mirror['success']:
+            return
+        return mirror_list.append(mirror['files'][0]['url'])
+    
+    except requests.exceptions.ConnectionError:
+        return file_name + ' couldn\'t be uploaded to ' + selected_host
+    
+    except FileNotFoundError:
+        return file_name + ' was not found.'        
 
-	with open("Media/" + filename, "rb") as file:
-		files = {"file": (title, file)}
 
-		response = post(url, files=files, auth=auth)
+def upload(file_name):
+    file_name = conv_to_mp4(file_name)
+    print("Uploading to mirrors...")
+    clone_list = json.load(open("host_list.json", 'rb'))
+    size = os.path.getsize(file_name)
+    print("Size:", str(size/1024/1024) + "MB")
+    mirror_list = []
+    threads = []
+    for clone in clone_list:
+        if clone[3] < size:
+            continue
 
-	if response.status_code == 401:
-		raise PermissionError
+        t = threading.Thread(target=upload_files, args=(clone[1],file_name,mirror_list))
+        threads.append(t)
+    
+    for thread in threads:
+        thread.start()
+    
+    for thread in threads:
+        thread.join()
+    
+    print("Upload complete!")
+    return mirror_list
+        
+#converts given file to mp4, and returns new filename
+def conv_to_mp4(file_name):
+    
+    vid_name = file_name[:-4] + ".mp4"
+    
+    ##check if file is mkv and convert to mp4
+    if ".mkv" in file_name:
+        ffmpeg_subproc = [
+            "ffmpeg",
+            "-i", file_name,
+            "-strict", "-2", #fixes opus experimental error
+            "-vcodec", "copy",
+            vid_name
+            ]
+        conv_process = subprocess.run(ffmpeg_subproc)
+        return vid_name
 
-	return response.json()["shortcode"]
-
-def wait_completed(code):
-	""" Poll video until 100% complete """
-
-	url = "https://api.streamable.com/videos/"
-
-	while True:
-		response = get(url + code, auth=auth)
-
-		if response.status_code == 200:
-			response = response.json()
-
-			# 0 Uploading
-			# 1 Processing
-			# 2 Complete
-			# 3 Error
-
-			if response["status"] == 2:
-				return "Complete"
-			elif response["status"] == 3:
-				return response["message"]
-
-			sleep(5)
-		else:
-			return response.status_code + response.text
+    else:
+        return file_name
 
 if __name__ == "__main__":
-	if path.exists("ffmpeg.exe"):
-		print(run())
-	else:
-		print("Needs ffmpeg")
+    if path.exists("/usr/bin/ffmpeg"):
+        print(run())
+    else:
+        print("Needs ffmpeg")
