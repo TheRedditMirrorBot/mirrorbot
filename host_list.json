@@ -1,0 +1,6 @@
+[
+    ["https://mixtape.moe/", "https://mixtape.moe/upload.php", "mixtape.moe", 104857600],
+    ["https://doko.moe/", "https://doko.moe/upload.php", "doko.moe", 2147483648],
+    ["https://coka.la/", "https://coka.la/upload.php", "coka.la", 536870912],
+    ["https://safe.moe/", "https://safe.moe/api/upload", "safe.moe", 314572800]
+]
