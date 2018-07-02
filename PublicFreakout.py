@@ -194,8 +194,7 @@ def reply_reddit(submission, mirror_url):
             comment = submission.reply(" | ".join([
                 mirror_text + "  \nI am a bot",
                 "[Feedback](https://www.reddit.com/message/compose/?to={[Reddit][host_account]}&subject=PublicFreakout%20Mirror%20Bot)".format(config),
-                "Github (source will be uploaded soon) ",
-                "*Please send feedback if the link begins a download instead of playing within your browser*"
+                "[Github](https://github.com/dopeslothe/PublicFreakout-Mirror-Bot) "
             ]))
             comment.mod.approve()
             break
