@@ -45,6 +45,7 @@ except FileNotFoundError:
         saved_links = []
         dump(saved_links, file)
 
+
 def check_links(submission):
     mirror_list = []
 
@@ -142,7 +143,7 @@ def process(submission):
             audio_url = video_url.rsplit("/", 1)[0] + "/audio"
             download("audio", audio_url)
             combine_media()
-
+            
             mirror_url = upload("Media/output.mp4")
             status = "Complete"
             print("Mirror url: " + str(mirror_url))
@@ -253,6 +254,12 @@ def run():
 
             cleanup()
 
+def save_file_size(file_name):
+    with open("file_sizes.txt", "a") as file:
+        out = str(ctime()) + ": " + str(os.path.getsize(file_name)) + "\n"
+        file.write(out)
+
+
 def save(status, submission, mirror_url=None):
     if not mirror_url:
         print("Unable to save to file: No url supplied")
@@ -302,6 +309,7 @@ def upload(file_name):
     print("Uploading to mirrors...")
     clone_list = json.load(open("host_list.json", 'rb'))
     size = os.path.getsize(file_name)
+    save_file_size(file_name)
     print("Size:", str(size/1024/1024) + "MB")
     mirror_list = []
     threads = []
