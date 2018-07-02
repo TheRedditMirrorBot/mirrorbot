@@ -15,6 +15,7 @@ import os
 import simplejson as json
 import requests
 import threading
+import urllib.parse
 
 print(getpid())
 
@@ -190,7 +191,7 @@ def reply_reddit(submission, mirror_url):
             for x in mirror_url:
                 if not x:
                     continue
-                mirror_text += "[Mirror {}]({}) \n\n ".format(counter + 1, mirror_url[counter])
+                mirror_text += "[Mirror {}](https://dopeslothe.github.io/PublicFreakout-Mirror-Player/?url={}) \n\n ".format(counter + 1, urllib.parse.quote(mirror_url[counter], safe=''))
                 counter += 1
             comment = submission.reply(" | ".join([
                 mirror_text + "  \nI am a bot",
@@ -314,7 +315,8 @@ def upload(file_name):
     mirror_list = []
     threads = []
     for clone in clone_list:
-        if clone[3] < size:
+        print(str(clone[3]), " ", str(size))
+        if clone[3] < size or size > 536870912:
             continue
 
         t = threading.Thread(target=upload_files, args=(clone[1],file_name,mirror_list))
