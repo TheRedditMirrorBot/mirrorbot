@@ -97,6 +97,9 @@ def download(filename, url):
 def process(submission):
     print("process() entered")
     print("Got next post: ", submission.title, " ", "https://reddit.com" + submission.permalink)
+    #Don't wanna mirror nazi propaganda
+    if "Antifa" in submission.title or "antifa" in submission.title:
+        return
     mirror_url = None
     if check_links(submission):
         print("Reposted old mirror link!")
