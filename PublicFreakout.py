@@ -191,7 +191,7 @@ def reply_reddit(submission, mirror_url):
             for x in mirror_url:
                 if not x:
                     continue
-                mirror_text += "[Mirror {}](https://dopeslothe.github.io/PublicFreakout-Mirror-Player/?url={}) \n\n ".format(counter + 1, urllib.parse.quote(mirror_url[counter], safe=''))
+                mirror_text += "[Mirror {}](https://dopeslothe.github.io/PublicFreakout-Mirror-Player/?url={}) \n\n".format(counter + 1, urllib.parse.quote(mirror_url[counter], safe=''))
                 counter += 1
             comment = submission.reply(" | ".join([
                 mirror_text + "  \nI am a bot",
