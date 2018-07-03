@@ -345,6 +345,7 @@ def conv_to_mp4(file_name):
             "-i", file_name,
             "-strict", "-2", #fixes opus experimental error
             "-vcodec", "copy",
+            "-y",
             vid_name
             ]
         conv_process = subprocess.run(ffmpeg_subproc)
