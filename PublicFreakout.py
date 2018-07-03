@@ -34,7 +34,6 @@ config = ConfigParser()
 config.read("praw.ini")
 
 reddit = praw.Reddit(**config["Reddit"])
-auth = config["Streamable"]["username"], config["Streamable"]["password"]
 yt = youtube_dl.YoutubeDL({"logger": MyLogger(), "outtmpl": "Media/%(id)s.mp4"})
 
 try:
@@ -271,7 +270,7 @@ def save(status, submission, mirror_url=None):
     text = "{:<19} | " + ctime() + " | https://www.reddit.com{:<85} | {}\n"
     permalink = submission.permalink.encode("ascii", "ignore").decode()
 
-    with open(auth[0] + " log.txt", "a") as file:
+    with open("mirror_bot_log.txt", "a") as file:
         file.write(text.format(status, permalink, " | " + str(mirror_url)))
 
     saved_links.append({
