@@ -20,6 +20,7 @@ import threading
 import urllib.parse
 import boto3
 import praw
+import magic
 
 print(getpid())
 
@@ -152,7 +153,7 @@ def process(submission):
             print("Mirror url: " + str(mirror_url))
         
         #if not gif but still no audio
-        elif "AccessDenied" in open('Media/audio').read():
+        elif not 'octet-stream' in magic.Magic(mime=True,uncompress=True).from_file('Media/audio'):
             mirror_url = upload("Media/video", submission.id)
             status = "Complete"
             print("Mirror url: " + str(mirror_url))
