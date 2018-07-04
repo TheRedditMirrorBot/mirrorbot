@@ -6,7 +6,10 @@ from os import getpid, listdir, remove, path, makedirs
 from prawcore.exceptions import RequestException, ServerError
 from time import sleep, ctime, time
 from requests import get
+from boto3 import session
+from botocore.client import Config
 
+import hashlib
 import praw
 import re
 import subprocess
@@ -34,6 +37,8 @@ config = ConfigParser()
 config.read("praw.ini")
 
 reddit = praw.Reddit(**config["Reddit"])
+do_access_id = config["DigitalOcean"]["access_id"]
+do_secret_key = config["DigitalOcean"]["secret_key"]
 yt = youtube_dl.YoutubeDL({"logger": MyLogger(), "outtmpl": "Media/%(id)s.mp4"})
 
 try:
@@ -188,13 +193,8 @@ def reply_reddit(submission, mirror_url):
         if not mirror_url:
             return
         try:
-            counter = 0
             mirror_text = ""
-            for x in mirror_url:
-                if not x:
-                    continue
-                mirror_text += "[Mirror {}](https://dopeslothe.github.io/PublicFreakout-Mirror-Player/?url={}) \n\n".format(counter + 1, urllib.parse.quote(mirror_url[counter], safe=''))
-                counter += 1
+            mirror_text += "[Mirror](https://dopeslothe.github.io/PublicFreakout-Mirror-Player/?url={}) \n\n".format(urllib.parse.quote(mirror_url, safe=''))
             comment = submission.reply(" | ".join([
                 mirror_text + "  \nI am a bot",
                 "[Feedback](https://www.reddit.com/message/compose/?to={[Reddit][host_account]}&subject=PublicFreakout%20Mirror%20Bot)".format(config),
@@ -291,47 +291,31 @@ def save(status, submission, mirror_url=None):
 #new upload function, doesn't use limf
 #uploads to given pomf.se clone
 
-def upload_files(selected_host, file_name, mirror_list):
-    url = selected_host
-    try:
-        answer = requests.post(url, files={'files[]': open(file_name, 'rb')})
-        mirror = json.loads(answer.text)
-        if not mirror['success']:
-            return
-        return mirror_list.append(mirror['files'][0]['url'])
-    
-    except requests.exceptions.ConnectionError:
-        return file_name + ' couldn\'t be uploaded to ' + selected_host
-    
-    except FileNotFoundError:
-        return file_name + ' was not found.'        
-
-
 def upload(file_name):
     file_name = conv_to_mp4(file_name)
-    print("Uploading to mirrors...")
-    clone_list = json.load(open("host_list.json", 'rb'))
-    size = os.path.getsize(file_name)
+    print("Uploading to DO...")
     save_file_size(file_name)
-    print("Size:", str(size/1024/1024) + "MB")
-    mirror_list = []
-    threads = []
-    for clone in clone_list:
-        print(str(clone[3]), " ", str(size))
-        if clone[3] < size or size > 536870912:
-            continue
+    print("Size:", str(os.path.getsize(file_name)/1024/1024) + "MB")
+    session = session.Session()
+    client = session.client('s3',
+        region_name='nyc3',
+        endpoint_url="https://pf-mirror.nyc3.digitaloceanspaces.com",
+        aws_access_key_id=do_access_id,
+        aws_secret_access_key=do_secret_key)
+    input = str.encode(str(time.time()))
+    key = hashlib.md5(input).hexdigest()[4:12]
 
-        t = threading.Thread(target=upload_files, args=(clone[1],file_name,mirror_list))
-        threads.append(t)
-    
-    for thread in threads:
-        thread.start()
-    
-    for thread in threads:
-        thread.join()
+    client.upload_file(file_name, 'videos', key)
+
+    url = client.generate_presigned_url(
+        ClientMethod='get_object',
+        Params={
+            'Bucket': 'videos',
+            'Key': 'test'
+        })
     
     print("Upload complete!")
-    return mirror_list
+    return url
         
 #converts given file to mp4, and returns new filename
 def conv_to_mp4(file_name):
