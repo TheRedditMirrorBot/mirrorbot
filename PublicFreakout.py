@@ -9,8 +9,7 @@ from requests import get
 from boto3 import session
 from botocore.client import Config
 
-import hashlib
-import praw
+import praw.models
 import re
 import subprocess
 import youtube_dl
@@ -19,6 +18,8 @@ import simplejson as json
 import requests
 import threading
 import urllib.parse
+import boto3
+import praw
 
 print(getpid())
 
@@ -40,6 +41,7 @@ reddit = praw.Reddit(**config["Reddit"])
 do_access_id = config["DigitalOcean"]["access_id"]
 do_secret_key = config["DigitalOcean"]["secret_key"]
 yt = youtube_dl.YoutubeDL({"logger": MyLogger(), "outtmpl": "Media/%(id)s.mp4"})
+session = session.Session()
 
 try:
     with open("saved_links.txt") as file:
@@ -135,24 +137,31 @@ def process(submission):
                 submission.media = reddit.submission(submission.crosspost_parent[3:]).media
             else:
                 url = get(submission.url).url
-                _id = praw.models.reddit.submission.id_from_url(url)
+                _id = praw.models.reddit.submission.Submission.id_from_url(url)
                 submission.media = reddit.submission(_id).media
 
         video_url = submission.media["reddit_video"]["fallback_url"]
         download("video", video_url)
+        
+        audio_url = video_url.rsplit("/", 1)[0] + "/audio"
+        download("audio", audio_url)
 
         if submission.media["reddit_video"]["is_gif"]:
-            mirror_url = upload("Media/video")
+            mirror_url = upload("Media/video", submission.id)
             status = "Complete"
             print("Mirror url: " + str(mirror_url))
-            
         
+        #if not gif but still no audio
+        elif "AccessDenied" in open('Media/audio').read():
+            mirror_url = upload("Media/video", submission.id)
+            status = "Complete"
+            print("Mirror url: " + str(mirror_url))
+        
+        #audio exists
         else:
-            audio_url = video_url.rsplit("/", 1)[0] + "/audio"
-            download("audio", audio_url)
             combine_media()
             
-            mirror_url = upload("Media/output.mp4")
+            mirror_url = upload("Media/output.mp4", submission.id)
             status = "Complete"
             print("Mirror url: " + str(mirror_url))
 
@@ -174,7 +183,7 @@ def process(submission):
 
     file = [i for i in listdir("Media")][0]
     file = "Media/" + str(file)
-    mirror_url = upload(file)
+    mirror_url = upload(file, submission.id)
     if "NOT_HTTP: " in mirror_url:
         print("NOT HTTP")
         return
@@ -194,13 +203,14 @@ def reply_reddit(submission, mirror_url):
             return
         try:
             mirror_text = ""
-            mirror_text += "[Mirror](https://dopeslothe.github.io/PublicFreakout-Mirror-Player/?url={}) \n\n".format(urllib.parse.quote(mirror_url, safe=''))
+            mirror_text += "[Mirror](https://dopeslothe.github.io/PublicFreakout-Mirror-Player/?url={}) \n\n".format(urllib.parse.quote(str(mirror_url), safe=''))
             comment = submission.reply(" | ".join([
                 mirror_text + "  \nI am a bot",
                 "[Feedback](https://www.reddit.com/message/compose/?to={[Reddit][host_account]}&subject=PublicFreakout%20Mirror%20Bot)".format(config),
                 "[Github](https://github.com/dopeslothe/PublicFreakout-Mirror-Bot) "
             ]))
             comment.mod.approve()
+            comment.mod.distinguish(how='yes',sticky=True)
             break
         
         except praw.exceptions.APIException:
@@ -291,31 +301,36 @@ def save(status, submission, mirror_url=None):
 #new upload function, doesn't use limf
 #uploads to given pomf.se clone
 
-def upload(file_name):
+def upload(file_name, submission_id):
     file_name = conv_to_mp4(file_name)
     print("Uploading to DO...")
     save_file_size(file_name)
     print("Size:", str(os.path.getsize(file_name)/1024/1024) + "MB")
-    session = session.Session()
     client = session.client('s3',
         region_name='nyc3',
-        endpoint_url="https://pf-mirror.nyc3.digitaloceanspaces.com",
+        endpoint_url="https://pf-mirror-1.nyc3.digitaloceanspaces.com",
         aws_access_key_id=do_access_id,
         aws_secret_access_key=do_secret_key)
-    input = str.encode(str(time.time()))
-    key = hashlib.md5(input).hexdigest()[4:12]
+    key = str(submission_id) + ".mp4"
 
     client.upload_file(file_name, 'videos', key)
-
-    url = client.generate_presigned_url(
-        ClientMethod='get_object',
-        Params={
-            'Bucket': 'videos',
-            'Key': 'test'
-        })
+    
+    resource = boto3.resource('s3',
+        region_name='nyc3',
+        endpoint_url="https://pf-mirror-1.nyc3.digitaloceanspaces.com",
+        aws_access_key_id=do_access_id,
+        aws_secret_access_key=do_secret_key)
+    
+    #video_object = resource.Object('pf-mirror', key)
+    #video_object_acl = video_object.Acl()
+    #video_object_acl.put(ACL='public-read')
+    print(key)
+    client.put_object_acl(ACL='public-read', Bucket='videos', Key=key)
+    key = "videos/" + key
+    mirror_url = "https://pf-mirror-1.nyc3.digitaloceanspaces.com/" + key
     
     print("Upload complete!")
-    return url
+    return str(mirror_url)
         
 #converts given file to mp4, and returns new filename
 def conv_to_mp4(file_name):
