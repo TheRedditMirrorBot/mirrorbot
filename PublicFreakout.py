@@ -36,7 +36,7 @@ class MyLogger():
         pass
 
 config = ConfigParser()
-config.read("praw.ini")
+config.read("config.ini")
 
 reddit = praw.Reddit(**config["Reddit"])
 do_access_id = config["DigitalOcean"]["access_id"]
