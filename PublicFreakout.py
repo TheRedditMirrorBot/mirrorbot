@@ -41,7 +41,14 @@ config.read("config.ini")
 reddit = praw.Reddit(**config["Reddit"])
 do_access_id = config["DigitalOcean"]["access_id"]
 do_secret_key = config["DigitalOcean"]["secret_key"]
-yt = youtube_dl.YoutubeDL({"logger": MyLogger(), "outtmpl": "Media/%(id)s.mp4"})
+
+ydl_opts = {
+    'format': 'best[ext=webm]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+    'logger': MyLogger(),
+    'outtmpl': "Media/%(id)s.mp4",
+}
+
+yt = youtube_dl.YoutubeDL(ydl_opts)
 session = session.Session()
 
 try:
@@ -321,10 +328,7 @@ def upload(file_name, submission_id):
         endpoint_url="https://pf-mirror-1.nyc3.digitaloceanspaces.com",
         aws_access_key_id=do_access_id,
         aws_secret_access_key=do_secret_key)
-    
-    #video_object = resource.Object('pf-mirror', key)
-    #video_object_acl = video_object.Acl()
-    #video_object_acl.put(ACL='public-read')
+
     print(key)
     client.put_object_acl(ACL='public-read', Bucket='videos', Key=key)
     key = "videos/" + key
