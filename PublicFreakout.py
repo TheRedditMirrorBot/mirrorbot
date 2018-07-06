@@ -188,6 +188,9 @@ def process(submission):
     except (youtube_dl.utils.SameFileError) as e:
         print(str(e))
         return save(str(e), submission, "Same file error")
+    except (UnicodeDecodeError) as e:
+        print(str(e))
+        return save(str(e), submission, "UnicodeDecodeError")    
 
     file = [i for i in listdir("Media")][0]
     file = "Media/" + str(file)
