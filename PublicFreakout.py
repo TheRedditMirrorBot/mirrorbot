@@ -214,7 +214,7 @@ def reply_reddit(submission, mirror_url):
             return
         try:
             mirror_text = ""
-            mirror_text += "[Mirror](https://dopeslothe.github.io/PublicFreakout-Mirror-Player/?url={}) \n\n".format(urllib.parse.quote(str(mirror_url), safe=''))
+            mirror_text += "[Mirror](http://mirrorbot.ga" + submission.permalink + ") \n\n".format(urllib.parse.quote(str(mirror_url), safe=''))
             comment = submission.reply(" | ".join([
                 mirror_text + "  \nI am a bot",
                 "[Feedback](https://www.reddit.com/message/compose/?to={[Reddit][host_account]}&subject=PublicFreakout%20Mirror%20Bot)".format(config),
