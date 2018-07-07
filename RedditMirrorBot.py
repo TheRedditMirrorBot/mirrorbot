@@ -39,6 +39,8 @@ logger.debug("Config opened")
 
 do_access_id = config["DigitalOcean"]["access_id"]
 do_secret_key = config["DigitalOcean"]["secret_key"]
+specified_sub = config["Reddit"]["sub_to_mirror"]
+specified_host = config["General"]["backend_host"]
 
 # Logger class for youtube_dl
 class MyLogger(object):
@@ -63,7 +65,10 @@ def network_listener():
 
 # Watches for new subreddit submissions, and attempts to mirror them
 def sub_watcher():
+    reddit = praw.Reddit(**config["Reddit"])
     
+    while True:
+        stream = reddit.subreddit(sub_to_mirror).stream.submissions(pause_after=1)
     
 # Watches for new comments containing !mirror, and mirrors the parent comment's video if possible
 def comment_watcher():
@@ -71,7 +76,20 @@ def comment_watcher():
 
 # Manages POST listener, comment watcher, and sub watcher
 def main():
+    threads = []
+    # sub_watcher
+    threads.append(threading.Thread(target=sub_watcher, args=()))
+    # comment_watcher
+    threads.append(threading.Thread(target=comment_watcher, args=()))
+    # network listener
+    threads.append(threading.Thread(target=network_listener, args=()))
     
+    # start threads
+    for thread in threads:
+        thread.start()
+    # continue upon completeion of all threads (should never happen)
+    for thread in threads:
+        thread.join()
 
 if __name__ == "__main__":
     if path.exists("/usr/bin/ffmpeg"):
