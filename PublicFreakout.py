@@ -16,7 +16,7 @@ import youtube_dl
 import os
 import simplejson as json
 import requests
-import threading
+import multiprocessing
 import urllib.parse
 import boto3
 import praw
