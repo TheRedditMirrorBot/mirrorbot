@@ -115,9 +115,7 @@ def process(submission):
     if "Antifa" in submission.title or "antifa" in submission.title:
         return
     mirror_url = None
-    if check_links(submission):
-        print("Reposted old mirror link!")
-        return
+
     
     print("VIDEO URL: "+ submission.url)
 
